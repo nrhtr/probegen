@@ -1,11 +1,17 @@
 {
   description = "Generate cloudprober probe definitions from backstage";
 
-  inputs.nixpkgs.url = "nixpkgs/nixos-23.05";
+  inputs = {
+    nixpkgs.url = "nixpkgs/nixos-23.05";
+
+    pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
+    pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs = {
     self,
     nixpkgs,
+    pre-commit-hooks,
   }: let
     # to work with older version of flakes
     lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
@@ -25,7 +31,6 @@
     # Provide some binary packages for selected system types.
     packages = forAllSystems (system: let
       pkgs = nixpkgsFor.${system};
-    in {
       probegen = pkgs.buildGoModule {
         pname = "probegen";
         inherit version;
@@ -44,6 +49,9 @@
 
         vendorSha256 = "sha256-EqFZKZqweakgMAsM4YmO9qS5X2/g5sFGBBzJyVRp9Ts=";
       };
+    in {
+      inherit probegen;
+      default = probegen;
     });
 
     # Add dependencies that are only needed for development
@@ -51,13 +59,21 @@
       pkgs = nixpkgsFor.${system};
     in {
       default = pkgs.mkShell {
+        inherit (self.checks.${system}.pre-commit-check) shellHook;
         buildInputs = with pkgs; [go gopls gotools go-tools];
       };
     });
 
-    # The default package for 'nix build'. This makes sense if the
-    # flake provides only one package or there is a clear "main"
-    # package.
-    defaultPackage = forAllSystems (system: self.packages.${system}.probegen);
+    # Add pre-commit checks
+    checks = forAllSystems (system: {
+      pre-commit-check = pre-commit-hooks.lib.${system}.run {
+        src = ./.;
+        hooks = {
+          alejandra.enable = true;
+          gofmt.enable = true;
+          staticcheck.enable = true;
+        };
+      };
+    });
   };
 }
